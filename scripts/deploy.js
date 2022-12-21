@@ -4,28 +4,54 @@
 // You can also run a script with `npx hardhat run <script>`. If you do that, Hardhat
 // will compile your contracts, add the Hardhat Runtime Environment's members to the
 // global scope, and execute the script.
-const hre = require("hardhat");
+const { ethers, run, network } = require("hardhat")
 
 async function main() {
-  const currentTimestampInSeconds = Math.round(Date.now() / 1000);
-  const ONE_YEAR_IN_SECS = 365 * 24 * 60 * 60;
-  const unlockTime = currentTimestampInSeconds + ONE_YEAR_IN_SECS;
+    const EquityPriceStorageFactory = await ethers.getContractFactory(
+        "EquityPriceStorage"
+    )
+    console.log("deploying EquityPriceStorage contract")
+    const equityPriceStorageContract = await EquityPriceStorageFactory.deploy()
+    await equityPriceStorageContract.deployed()
+    console.log(`deployed address ${equityPriceStorageContract.address}`)
+    if (network.config.chainId === 5 && process.env.ETHERSCAN_API_KEY) {
+        console.log("waiting for the deployment to sync to etherscan.")
+        await equityPriceStorageContract.deployTransaction.wait(6)
+        console.log("Start to verify")
+        await verify(equityPriceStorageContract.address, [])
+    }
 
-  const lockedAmount = hre.ethers.utils.parseEther("1");
+    const latestPrice = await equityPriceStorageContract.getPrice("dummy")
+    console.log(`price is ${latestPrice}`)
 
-  const Lock = await hre.ethers.getContractFactory("Lock");
-  const lock = await Lock.deploy(unlockTime, { value: lockedAmount });
+    const transactionResponse = await equityPriceStorageContract.addEquity(
+        "dummy",
+        2
+    )
+    await transactionResponse.wait(1)
+    const updatedPrice = await equityPriceStorageContract.getPrice("dummy")
+    console.log(`updated price is ${updatedPrice}`)
+}
 
-  await lock.deployed();
-
-  console.log(
-    `Lock with 1 ETH and unlock timestamp ${unlockTime} deployed to ${lock.address}`
-  );
+async function verify(contractAddress, args) {
+    console.log("verifying contract...")
+    try {
+        await run("verify:verify", {
+            address: contractAddress,
+            constructorArguments: args,
+        })
+    } catch (e) {
+        if (e.message.toLowerCase().includes("already verified")) {
+            console.log("Already verified.")
+        } else {
+            console.log(e)
+        }
+    }
 }
 
 // We recommend this pattern to be able to use async/await everywhere
 // and properly handle errors.
 main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+    console.error(error)
+    process.exitCode = 1
+})
